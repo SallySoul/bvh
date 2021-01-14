@@ -7,6 +7,7 @@
 use crate::aabb::{Bounded, AABB};
 use crate::bounding_hierarchy::{BHShape, BoundingHierarchy};
 use crate::ray::Ray;
+
 use crate::utils::{concatenate_vectors, joint_aabb_of_shapes, Bucket};
 use crate::EPSILON;
 use nalgebra::Point3;
@@ -101,6 +102,24 @@ impl PartialEq for BVHNode {
             _ => false,
         }
     }
+}
+
+/// Used to maintain state during the recursive search for the closest shape
+struct ClosestQueryState<'a, Shape: BHShape> {
+    // Nodes of BVH to search
+    nodes: &'a [BVHNode],
+
+    // Shapes contained in BVH
+    shapes: &'a [Shape],
+
+    // The point we are querying against
+    query: &'a Point3<f32>,
+
+    // The current best upper bound on closest shape
+    upper_bound: f32,
+
+    // The index of the node that supplied closest shape
+    upper_bound_index: usize,
 }
 
 impl BVHNode {
@@ -394,6 +413,47 @@ impl BVHNode {
             }
         }
     }
+
+    /// Traverses the [`BVH`] recursively and returns the closest shape to `query`.
+    ///
+    /// [`AABB`]: ../aabb/struct.AABB.html
+    /// [`BVH`]: struct.BVH.html
+    /// [`Ray`]: ../ray/struct.Ray.html
+    ///
+    pub fn closest_recursive<'a, Shape: BHShape>(
+        state: &mut ClosestQueryState<Shape>,
+        node_index: usize,
+    ) {
+        // As we visit each node update upper bound
+        let node_aabb = state.nodes[node_index].get_node_aabb(state.shapes);
+        let node_upper_bound:f32 = (node_aabb.furthest_corner(state.query) - state.query).norm();
+        if node_upper_bound < state.upper_bound {
+            state.upper_bound = node_upper_bound;
+            state.upper_bound_index = node_index;
+        }
+
+        match state.nodes[node_index] {
+            BVHNode::Node {
+                ref child_l_aabb,
+                child_l_index,
+                ref child_r_aabb,
+                child_r_index,
+                ..
+            } => {
+                // If left is closer, recurse
+                let left_lower_bound:f32 = child_l_aabb.distance(state.query);
+                if left_lower_bound < state.upper_bound {
+                    BVHNode::closest_recursive(&mut state, child_l_index);
+                }
+
+                let right_lower_bound = child_r_aabb.distance(state.query);
+                if right_lower_bound < state.upper_bound {
+                    BVHNode::closest_recursive(&mut state, child_r_index);
+                }
+            }
+            BVHNode::Leaf { shape_index, .. } => {}
+        }
+    }
 }
 
 /// The [`BVH`] data structure. Contains the list of [`BVHNode`]s.
@@ -434,6 +494,38 @@ impl BVH {
             .iter()
             .map(|index| &shapes[*index])
             .collect::<Vec<_>>()
+    }
+
+    /// Traverses the [`BVH`].
+    /// Returns the subset of `shapes` which are candidates for being closest to the query point.
+    /// `guess` is the index of a possible closest shape.
+    /// Guess will not affect the correctness of the result, but a good guess can significantly reduce the cost of the traversal.
+    pub fn closest_with_guess<'a, Shape: Bounded>(
+        &'a self,
+        query: &Point3<f32>,
+        guess: &usize,
+        shapes: &'a [Shape],
+    ) -> &Shape {
+        let node_aabb = self.nodes[guess]
+
+
+        let mut state = ClosestStateQuery {
+            nodes: &self.nodes,
+            shapes: &shapes,
+            query: &query,
+            upper
+        }
+        BVHNode::closest_recursive(&self.nodes, 0, query, &mut indices, 0);
+    }
+
+    /// Traverses the [`BVH`].
+    /// Returns the subset of `shapes` which are candidates for being closest to the query point.
+    pub fn closest<'a, Shape: Bounded>(
+        &'a self,
+        query: &Point3<f32>,
+        shapes: &'a [Shape],
+    ) -> Vec<&Shape> {
+      self.closest_with_guess(query, 0, shapes);
     }
 
     /// Prints the [`BVH`] in a tree-like visualization.
