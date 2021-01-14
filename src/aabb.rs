@@ -6,6 +6,7 @@ use std::ops::Index;
 
 use approx::relative_eq;
 use nalgebra::{Point3, Vector3};
+use num::Zero;
 
 use crate::axis::Axis;
 
@@ -557,7 +558,7 @@ impl AABB {
         }
     }
 
-    /// Returns the corner of the [`AABB`] furthest from query point.
+    /// Returns the corner of the [`AABB`] furthest from `query` point.
     ///
     /// # Examples
     /// ```
@@ -594,6 +595,34 @@ impl AABB {
             }
         }
         result
+    }
+
+    /// Returns the minumum distance of any point point in the [`AABB`] to `query` point.
+    /// Thus, if the point is on the boundary or contained in the interval, the
+    /// result is 0.0
+    ///
+    /// # Examples
+    /// ```
+    /// use bvh::aabb::AABB;
+    /// use bvh::axis::Axis;
+    /// use bvh::nalgebra::Point3;
+    ///
+    /// let min = Point3::new(0.0,0.0,0.0);
+    /// let max = Point3::new(1.0,1.0,1.0);
+    /// let aabb = AABB::with_bounds(min, max);
+    ///
+    /// assert!(aabb.distance(&Point3::new(0.5,0.5,0.5)) == 0.0);
+    /// assert!(aabb.distance(&Point3::new(-1.0,0.0,0.0)) == 1.0);
+    /// ```
+    ///
+    /// [`AABB`]: struct.AABB.html
+    ///
+    pub fn distance(&self, query: &Point3<f32>) -> f32 {
+        // At the time of writing, nalgebra does not have component wise min / max:
+        // https://github.com/dimforge/nalgebra/issues/619
+        let outside_distance = (self.min - query).zip_map(&(query - self.max), |a, b| a.max(b));
+        let result = outside_distance.zip_map(&Vector3::zero(), |a, b| a.max(b));
+        result.norm()
     }
 }
 
